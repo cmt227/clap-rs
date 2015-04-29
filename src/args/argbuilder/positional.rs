@@ -30,3 +30,18 @@ impl<'n> Display for PosBuilder<'n> {
         write!(f, "{}{}{}{}", if self.required { "<" } else {"["}, self.name,if self.required { ">" } else {"]"}, if self.multiple {"..."}else{""})
     }
 }
+
+impl<'n> Clone for PosBuilder<'n> {
+    fn clone(&self) -> PosBuilder<'n> {
+        PosBuilder {
+            name: self.name.clone(),
+            index: self.index,
+            help: self.help.clone(),
+            required: self.required,
+            multiple: self.multiple,
+            blacklist: self.blacklist.clone(),
+            requires: self.requires.clone(),
+            possible_vals: self.possible_vals.clone(),
+        }
+    }
+}

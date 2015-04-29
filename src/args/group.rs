@@ -243,3 +243,15 @@ impl<'n, 'ar> Debug for ArgGroup<'n, 'ar> {
     }
 }
 
+
+impl<'n, 'ar> Clone for ArgGroup<'n, 'ar> {
+    fn clone(&self) -> ArgGroup<'n, 'ar> {
+        ArgGroup {
+            name: self.name.clone(),
+            required: self.required,
+            requires: self.requires.clone(),
+            conflicts: self.conflicts.clone(),
+            args: self.args.clone(),
+        }
+    }
+}

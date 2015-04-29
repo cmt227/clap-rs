@@ -8,6 +8,7 @@ use std::vec::IntoIter;
 use std::borrow::ToOwned;
 use std::process;
 use std::fmt::Write;
+use std::iter::FromIterator;
 
 use args::{ ArgMatches, Arg, SubCommand, MatchedArg};
 use args::{ FlagBuilder, OptBuilder, PosBuilder};
@@ -58,8 +59,9 @@ pub struct App<'a, 'v, 'ab, 'u, 'h, 'ar> {
     opts: BTreeMap<&'ar str, OptBuilder<'ar>>,
     // A list of positional arguments
     positionals_idx: BTreeMap<u8, PosBuilder<'ar>>,
+    positionals_name: HashMap<&'ar str, u8>,
     // A list of subcommands
-    subcommands: BTreeMap<String, App<'a, 'v, 'ab, 'u, 'h, 'ar>>,
+    subcommands: BTreeMap<String, App<'ar, 'ar, 'ar, 'ar, 'ar, 'ar>>,
     needs_long_help: bool,
     needs_long_version: bool,
     needs_short_help: bool,
@@ -67,7 +69,6 @@ pub struct App<'a, 'v, 'ab, 'u, 'h, 'ar> {
     needs_subcmd_help: bool,
     required: HashSet<&'ar str>,
     matched_reqs: HashSet<&'ar  str>,
-    arg_list: HashSet<&'ar str>,
     short_list: HashSet<char>,
     long_list: HashSet<&'ar str>,
     blacklist: HashSet<&'ar str>,
@@ -100,6 +101,7 @@ impl<'a, 'v, 'ab, 'u, 'h, 'ar> App<'a, 'v, 'ab, 'u, 'h, 'ar>{
             flags: BTreeMap::new(),
             opts: BTreeMap::new(),
             positionals_idx: BTreeMap::new(),
+            positionals_name: HashMap::new(),
             subcommands: BTreeMap::new(),
             needs_long_version: true,
             needs_long_help: true,
@@ -108,7 +110,6 @@ impl<'a, 'v, 'ab, 'u, 'h, 'ar> App<'a, 'v, 'ab, 'u, 'h, 'ar>{
             needs_short_version: true,
             required: HashSet::new(), 
             matched_reqs: HashSet::new(),
-            arg_list: HashSet::new(),
             short_list: HashSet::new(),
             long_list: HashSet::new(),
             usage_str: None,
@@ -129,7 +130,7 @@ impl<'a, 'v, 'ab, 'u, 'h, 'ar> App<'a, 'v, 'ab, 'u, 'h, 'ar>{
     /// .author("Kevin <kbknapp@gmail.com>")
     /// # .get_matches();
     /// ```
-    pub fn author(mut self, a: &'a str) -> App<'a, 'v, 'ab, 'u, 'h, 'ar> {
+    pub fn author(&mut self, a: &'a str) -> &mut App<'a, 'v, 'ab, 'u, 'h, 'ar> {
         self.author = Some(a);
         self
     }
@@ -145,7 +146,12 @@ impl<'a, 'v, 'ab, 'u, 'h, 'ar> App<'a, 'v, 'ab, 'u, 'h, 'ar>{
     /// .about("Does really amazing things to great people")
     /// # .get_matches();
     /// ```
-    pub fn about(mut self, a: &'ab str) -> App<'a, 'v, 'ab, 'u, 'h, 'ar> {
+    pub fn about(&mut self, a: &'ab str) -> &mut App<'a, 'v, 'ab, 'u, 'h, 'ar> {
+        self.about = Some(a);
+        self
+    }
+
+    fn _about(mut self, a: &'ab str) -> App<'a, 'v, 'ab, 'u, 'h, 'ar> {
         self.about = Some(a);
         self
     }
@@ -163,7 +169,7 @@ impl<'a, 'v, 'ab, 'u, 'h, 'ar> App<'a, 'v, 'ab, 'u, 'h, 'ar>{
     /// .after_help("Does really amazing things to great people")
     /// # .get_matches();
     /// ```
-    pub fn after_help(mut self, h: &'h str) -> App<'a, 'v, 'ab, 'u, 'h, 'ar> {
+    pub fn after_help(&mut self, h: &'h str) -> &mut App<'a, 'v, 'ab, 'u, 'h, 'ar> {
         self.more_help = Some(h);
         self
     }
@@ -179,7 +185,7 @@ impl<'a, 'v, 'ab, 'u, 'h, 'ar> App<'a, 'v, 'ab, 'u, 'h, 'ar>{
     /// .version("v0.1.24")
     /// # .get_matches();
     /// ```
-    pub fn version(mut self, v: &'v str) -> App<'a, 'v, 'ab, 'u, 'h, 'ar>  {
+    pub fn version(&mut self, v: &'v str) -> &mut App<'a, 'v, 'ab, 'u, 'h, 'ar>  {
         self.version = Some(v);
         self
     }
@@ -204,7 +210,7 @@ impl<'a, 'v, 'ab, 'u, 'h, 'ar> App<'a, 'v, 'ab, 'u, 'h, 'ar>{
     /// .usage("myapp [-clDas] <some_file>")
     /// # .get_matches();
     /// ```
-    pub fn usage(mut self, u: &'u str) -> App<'a, 'v, 'ab, 'u, 'h, 'ar> {
+    pub fn usage(&mut self, u: &'u str) -> &mut App<'a, 'v, 'ab, 'u, 'h, 'ar> {
         self.usage_str = Some(u);
         self
     }
@@ -231,11 +237,11 @@ impl<'a, 'v, 'ab, 'u, 'h, 'ar> App<'a, 'v, 'ab, 'u, 'h, 'ar>{
     /// .arg(Arg::from_usage("-c --config=[CONFIG] 'Optionally sets a configuration file to use'"))
     /// # .get_matches();
     /// ```
-    pub fn arg(mut self, a: Arg<'ar, 'ar, 'ar, 'ar, 'ar, 'ar>) -> App<'a, 'v, 'ab, 'u, 'h, 'ar> {
-        if self.arg_list.contains(a.name) {
+    pub fn arg(&mut self, a: Arg<'ar, 'ar, 'ar, 'ar, 'ar, 'ar>) -> &mut App<'a, 'v, 'ab, 'u, 'h, 'ar> {
+        if self.flags.contains_key(a.name) || 
+           self.opts.contains_key(a.name) ||
+           self.positionals_name.contains_key(a.name) {
             panic!("Argument name must be unique\n\n\t\"{}\" is already in use", a.name);
-        } else {
-            self.arg_list.insert(a.name);
         }
         if let Some(grp) = a.group {
             let ag = self.groups.entry(grp).or_insert(ArgGroup::with_name(grp));
@@ -286,6 +292,7 @@ impl<'a, 'v, 'ab, 'u, 'h, 'ar> App<'a, 'v, 'ab, 'u, 'h, 'ar>{
                 panic!("Argument \"{}\" has conflicting requirements, both index() and takes_value(true) were supplied\n\n\tArguments with an index automatically take a value, you do not need to specify it manually", a.name);
             }
 
+            self.positionals_name.insert(a.name, i);
 
             // Create the Positional Arguemnt Builder with each HashSet = None to only allocate those that require it
             let mut pb = PosBuilder {
@@ -412,9 +419,9 @@ impl<'a, 'v, 'ab, 'u, 'h, 'ar> App<'a, 'v, 'ab, 'u, 'h, 'ar>{
     ///             Arg::with_name("input").index(1).help("the input file to use")])
     /// # .get_matches();
     /// ```
-    pub fn args(mut self, args: Vec<Arg<'ar, 'ar, 'ar, 'ar, 'ar, 'ar>>) -> App<'a, 'v, 'ab, 'u, 'h, 'ar> {
+    pub fn args(&mut self, args: Vec<Arg<'ar, 'ar, 'ar, 'ar, 'ar, 'ar>>) -> &mut App<'a, 'v, 'ab, 'u, 'h, 'ar> {
         for arg in args.into_iter() {
-            self = self.arg(arg);
+            self.arg(arg);
         }
         self
     }
@@ -434,8 +441,8 @@ impl<'a, 'v, 'ab, 'u, 'h, 'ar> App<'a, 'v, 'ab, 'u, 'h, 'ar>{
     /// .arg_from_usage("-c --conf=<config> 'Sets a configuration file to use'")
     /// # .get_matches();
     /// ```
-    pub fn arg_from_usage(mut self, usage: &'ar str) -> App<'a, 'v, 'ab, 'u, 'h, 'ar> {
-        self = self.arg(Arg::from_usage(usage));
+    pub fn arg_from_usage(&mut self, usage: &'ar str) -> &mut App<'a, 'v, 'ab, 'u, 'h, 'ar> {
+        self.arg(Arg::from_usage(usage));
         self
     }
 
@@ -458,9 +465,9 @@ impl<'a, 'v, 'ab, 'u, 'h, 'ar> App<'a, 'v, 'ab, 'u, 'h, 'ar>{
     ///    <input> 'The input file to use'")
     /// # .get_matches();
     /// ```
-    pub fn args_from_usage(mut self, usage: &'ar str) -> App<'a, 'v, 'ab, 'u, 'h, 'ar> {
+    pub fn args_from_usage(&mut self, usage: &'ar str) -> &mut App<'a, 'v, 'ab, 'u, 'h, 'ar> {
         for l in usage.lines() {
-            self = self.arg(Arg::from_usage(l.trim()));
+            self.arg(Arg::from_usage(l.trim()));
         }
         self
     }
@@ -497,7 +504,7 @@ impl<'a, 'v, 'ab, 'u, 'h, 'ar> App<'a, 'v, 'ab, 'u, 'h, 'ar>{
     ///                     .add_all(vec!["ver", "major", "minor","patch"])
     ///                     .required(true))
     /// # .get_matches();
-    pub fn arg_group(mut self, group: ArgGroup<'ar, 'ar>) -> App<'a, 'v, 'ab, 'u, 'h, 'ar> {
+    pub fn arg_group(&mut self, group: ArgGroup<'ar, 'ar>) -> &mut App<'a, 'v, 'ab, 'u, 'h, 'ar> {
         if group.required {
             self.required.insert(group.name);
             if let Some(ref reqs) = group.requires {
@@ -559,9 +566,9 @@ impl<'a, 'v, 'ab, 'u, 'h, 'ar> App<'a, 'v, 'ab, 'u, 'h, 'ar>{
     ///                     .add_all(vec!["ver", "major", "minor","patch"])
     ///                     .required(true))
     /// # .get_matches();
-    pub fn arg_groups(mut self, groups: Vec<ArgGroup<'ar, 'ar>>) -> App<'a, 'v, 'ab, 'u, 'h, 'ar> {
+    pub fn arg_groups(&mut self, groups: Vec<ArgGroup<'ar, 'ar>>) -> &mut App<'a, 'v, 'ab, 'u, 'h, 'ar> {
         for g in groups {
-            self = self.arg_group(g);
+            self.arg_group(g);
         }
         self
     }
@@ -582,7 +589,7 @@ impl<'a, 'v, 'ab, 'u, 'h, 'ar> App<'a, 'v, 'ab, 'u, 'h, 'ar>{
     ///             // Additional subcommand configuration goes here, such as other arguments...
     /// # .get_matches();
     /// ```
-    pub fn subcommand(mut self, subcmd: App<'a, 'v, 'ab, 'u, 'h, 'ar>) -> App<'a, 'v, 'ab, 'u, 'h, 'ar> {
+    pub fn subcommand(&mut self, subcmd: App<'ar, 'ar, 'ar, 'ar, 'ar, 'ar>) -> &mut App<'a, 'v, 'ab, 'u, 'h, 'ar> {
         if subcmd.name == "help" { self.needs_subcmd_help = false; }
         self.subcommands.insert(subcmd.name.clone(), subcmd);
         self
@@ -601,9 +608,10 @@ impl<'a, 'v, 'ab, 'u, 'h, 'ar> App<'a, 'v, 'ab, 'u, 'h, 'ar>{
     ///        SubCommand::new("debug").about("Controls debug functionality")])
     /// # .get_matches();
     /// ```
-    pub fn subcommands(mut self, subcmds: Vec<App<'a, 'v, 'ab, 'u, 'h, 'ar>>) -> App<'a, 'v, 'ab, 'u, 'h, 'ar> {
-        for subcmd in subcmds.into_iter() {
-            self = self.subcommand(subcmd);
+    pub fn subcommands(&mut self, subcmds: Vec<App<'ar, 'ar, 'ar, 'ar, 'ar, 'ar>>)
+                             -> &mut App<'a, 'v, 'ab, 'u, 'h, 'ar> {
+        for subcmd in subcmds {
+            self.subcommand(subcmd);
         }
         self
     }
@@ -728,7 +736,7 @@ impl<'a, 'v, 'ab, 'u, 'h, 'ar> App<'a, 'v, 'ab, 'u, 'h, 'ar>{
         let flags = !self.flags.is_empty();
         let pos = !self.positionals_idx.is_empty();
         let opts = !self.opts.is_empty();
-        let subcmds = !self.subcommands.is_empty();
+        let subcmds = !self.subcommands.is_empty() || self.needs_subcmd_help;
 
         let mut longest_flag = 0;
         for fl in self.flags
@@ -845,6 +853,12 @@ impl<'a, 'v, 'ab, 'u, 'h, 'ar> App<'a, 'v, 'ab, 'u, 'h, 'ar>{
                  self.get_spaces((longest_sc + 4) - (sc.name.len())),
                  if let Some(a) = sc.about {a} else {tab} );
             }
+            if self.needs_subcmd_help {
+                println!("{}{}{}{}",tab,
+                 "help",
+                 self.get_spaces((longest_sc + 4) - (4)),
+                 "Prints this message");
+            }
         }
 
         if let Some(h) = self.more_help {
@@ -915,11 +929,12 @@ impl<'a, 'v, 'ab, 'u, 'h, 'ar> App<'a, 'v, 'ab, 'u, 'h, 'ar>{
 
     // Starts the parsing process. Called on top level parent app **ONLY** then recursively calls
     // the real parsing function for subcommands
-    pub fn get_matches(mut self) -> ArgMatches<'ar, 'ar> {
+    pub fn get_matches(&mut self) -> ArgMatches<'ar, 'ar> {
         self.verify_positionals();
-        for (_,sc) in self.subcommands.iter_mut() {
-            sc.verify_positionals();
-        }
+        self.subcommands.iter_mut().map(|(_, v)| v.verify_positionals()).collect::<Vec<_>>();
+        // for (_,sc) in self.subcommands.iter_mut() {
+        //     sc.verify_positionals();
+        // }
 
         let mut matches = ArgMatches::new();
 
@@ -1181,9 +1196,11 @@ impl<'a, 'v, 'ab, 'u, 'h, 'ar> App<'a, 'v, 'ab, 'u, 'h, 'ar>{
             }
             self.flags.insert("vclap_version", arg);
         }
-        if self.needs_subcmd_help && !self.subcommands.is_empty() {
-            self.subcommands.insert("help".to_owned(), App::new("help").about("Prints this message"));
-        }
+        // Since we have a bool needs_subcmd_help we'll just use this to determine what to print
+        // during help generation
+        // if self.needs_subcmd_help && !self.subcommands.is_empty() {
+        //     self.subcommands.insert("help".to_owned(), App::new("help").about("Prints this message"));
+        // }
     }
 
     fn check_for_help_and_version(&self, arg: char) {
@@ -1534,5 +1551,36 @@ impl<'a, 'v, 'ab, 'u, 'h, 'ar> App<'a, 'v, 'ab, 'u, 'h, 'ar>{
             }
         }
         true
+    }
+}
+
+impl<'ar> Clone for App<'ar, 'ar, 'ar, 'ar, 'ar, 'ar> {
+    fn clone(&self) -> App<'ar, 'ar, 'ar, 'ar, 'ar, 'ar> {
+        App {
+            name: self.name.clone(),
+            name_slice: self.name_slice.clone(),
+            author: self.author.clone(),
+            about: self.about.clone(),
+            more_help: self.more_help.clone(),
+            version: self.version.clone(),
+            flags: self.flags.clone(),
+            opts: self.opts.clone(),
+            positionals_idx: self.positionals_idx.clone(),
+            positionals_name: self.positionals_name.clone(),
+            subcommands: self.subcommands.clone(),
+            needs_long_version: self.needs_long_version,
+            needs_long_help: self.needs_long_help,
+            needs_short_help: self.needs_short_help,
+            needs_subcmd_help: self.needs_subcmd_help,
+            needs_short_version: self.needs_short_version,
+            required: self.required.clone(), 
+            matched_reqs: HashSet::new(),
+            short_list: self.short_list.clone(),
+            long_list: self.long_list.clone(),
+            usage_str: self.usage_str.clone(),
+            blacklist: self.blacklist.clone(),
+            bin_name: self.bin_name.clone(),
+            groups: self.groups.clone(),
+       } 
     }
 }
